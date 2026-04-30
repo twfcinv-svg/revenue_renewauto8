@@ -18,3 +18,4 @@
 - 面積用 |MoM/YoY| 表示動能；顏色透明度隨強度提升。
 
 MIT License.
+add
