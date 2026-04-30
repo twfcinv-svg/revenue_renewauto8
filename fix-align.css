@@ -1,0 +1,17 @@
+:root{
+  --icp-body-height: 0px;    /* 控制表格上下長度 */
+  --icp-body-shift: 0px;     /* 控制整個表格上下移動 */
+  --icp-title-shift: -15px;    /* 控制「個股產業鏈」標題上下移動 */
+}
+
+#icp-section .section-head {
+  margin-top: var(--icp-title-shift);
+}
+
+#icp-section .icp-box{
+  border-radius: 8px;
+}
+
+#combo-section .chart-wrap{
+  padding-bottom: 8px;
+}
