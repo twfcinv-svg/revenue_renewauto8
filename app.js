@@ -41,13 +41,15 @@ const MIN_RENDER_AREA = 400;       // 個股最小面積（小於則不顯示）
 const NEWHIGH_COLLAPSE_AFTER = 0; // 營收創新高表格，預設先顯示前 15 檔
 
 
-let revenueRows = [], linksRows = [], downRows = [], months = [];
+let revenueRows = [], linksRows = [], downRows = [], downRowsRaw = [], months = [];
 let newHighSheetRows = [];
 let byCode = new Map();
 let byName = new Map();
 let linksByUp = new Map();
 let linksByDown = new Map();
-let downstreamHJ = [];
+
+let upstreamHJ = [];   // 左邊相同產業分類專用（DownLinks G/H/I）
+let downstreamHJ = []; // 右邊維持原本
 
 function z(s){ return String(s == null ? '' : s); }
 function toHalfWidth(str){ return z(str).replace(/[０-９Ａ-Ｚａ-ｚ]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)); }
@@ -182,9 +184,11 @@ async function loadWorkbook(){
   revenueRows = XLSX.utils.sheet_to_json(wsRev,   { defval:null });
   linksRows   = XLSX.utils.sheet_to_json(wsLinks, { defval:null });
   downRows    = wsDown ? XLSX.utils.sheet_to_json(wsDown, { defval:null }) : [];
+  downRowsRaw = wsDown ? XLSX.utils.sheet_to_json(wsDown, { header:1, defval:'', blankrows:false }) : [];
+
   newHighSheetRows = wsNewHigh
-  ? XLSX.utils.sheet_to_json(wsNewHigh, { header: 1, defval: '', blankrows: false, raw: false })
-  : [];
+    ? XLSX.utils.sheet_to_json(wsNewHigh, { header: 1, defval: '', blankrows: false, raw: false })
+    : [];
 
   byCode.clear();
   byName.clear();
@@ -200,42 +204,63 @@ async function loadWorkbook(){
     if (name) byName.set(name, r);
   }
 
-  linksByUp.clear();
-  linksByDown.clear();
+linksByUp.clear();
+linksByDown.clear();
 
-  // ===== Links（左邊上游）=====
-  for (const e of linksRows) {
-    const A = normCode(e['上游代號']);
-    const B = normCode(e['下游代號']);
-    const C = normText(e['關係類型']);
+// ===== Links（保留原本資料結構，避免其他功能受影響）=====
+for (const e of linksRows) {
+  const A = normCode(e['上游代號']);
+  const B = normCode(e['下游代號']);
+  const C = normText(e['關係類型']);
 
-    if (A && B && C) {
-      if (!linksByUp.has(A)) linksByUp.set(A, []);
-      linksByUp.get(A).push(e);
+  if (A && B && C) {
+    if (!linksByUp.has(A)) linksByUp.set(A, []);
+    linksByUp.get(A).push(e);
 
-      if (!linksByDown.has(B)) linksByDown.set(B, []);
-      linksByDown.get(B).push(e);
-    }
+    if (!linksByDown.has(B)) linksByDown.set(B, []);
+    linksByDown.get(B).push(e);
   }
+}
 
-  // ===== DownLinks（右邊下游）=====
-  downstreamHJ = [];
-  for (const row of downRows) {
-    const up = normCode(row['上游代號']);
-    const down = normCode(row['下游代號']);
-    const type = normText(row['關係類型']);
+// ===== DownLinks（左邊「相同產業分類」熱力圖專用：直接讀 G/H/I 欄）=====
+// G index=6：上游代號_熱力圖上
+// H index=7：下游代號_熱力圖上
+// I index=8：關係類型_熱力圖上（你現在的分類名稱）
+upstreamHJ = [];
+for (const row of downRowsRaw.slice(1)) { // 略過標題列
+  const up = normCode(row[6]);    // G
+  const down = normCode(row[7]);  // H
+  const type = normText(row[8]);  // I
 
-    if (up && down && type) {
-      downstreamHJ.push({
-        '上游代號': up,
-        '下游代號': down,
-        '關係類型': type
-      });
-    }
+  if (up && down && type) {
+    upstreamHJ.push({
+      '上游代號': up,
+      '下游代號': down,
+      '關係類型': type
+    });
   }
+}
 
-  console.log("Links 筆數 =", linksRows.length);
-  console.log("DownLinks 筆數 =", downstreamHJ.length);
+// ===== DownLinks（右邊下游）=====
+downstreamHJ = [];
+for (const row of downRows) {
+  const up = normCode(row['上游代號']);
+  const down = normCode(row['下游代號']);
+  const type = normText(row['關係類型']);
+
+  if (up && down && type) {
+    downstreamHJ.push({
+      '上游代號': up,
+      '下游代號': down,
+      '關係類型': type
+    });
+  }
+}
+
+console.log("Links 筆數 =", linksRows.length);
+console.log("左邊相同產業分類 DownLinks(GHI) 筆數 =", upstreamHJ.length);
+console.log("右邊 DownLinks(ABC) 筆數 =", downstreamHJ.length);
+``
 }
 
 function initControls(){
@@ -279,7 +304,8 @@ function getMetricValue(row, month, metric){
 // 下游：維持原本用 Links / DownLinks 的「關係類型」分群
 function getTreemapGroupName(svgId, edge, row){
   if (svgId === 'upTreemap') {
-    return normText(row?.['產業別'] || '未分類');
+    // 左邊改成依 DownLinks 的 I 欄分群
+    return normText(edge['關係類型'] || edge['type'] || '相同產業分類');
   }
   return normText(edge['關係類型'] || edge['type'] || '未分類');
 }
@@ -342,8 +368,9 @@ function handleRun(){
     if (window.setResultChipLink) window.setResultChipLink(codeLabel, nameLabel, extra);
   } catch (_) {}
 
-  const upstreamEdges = linksByDown.get(codeKey) || [];
+  const upstreamEdges = upstreamHJ.filter(e => e['下游代號'] === codeKey);
   let downstreamEdges = downstreamHJ.filter(e => e['上游代號'] === codeKey);
+
 
   downstreamEdges = downstreamEdges.filter(e => !String(e['下游代號']).endsWith('.US'));
 
@@ -773,25 +800,29 @@ function renderTreemap(svgId, hintId, edges, codeField, month, metric, colorMode
   const EPS = 0.01;
   const allSummaries = [];
 
-  for (const [rel, list] of groups) {
-    const avg = d3.mean(list, d => Number.isFinite(d.raw) ? d.raw : null);
-    const minLeafRaw = d3.min(list.map(d => Number.isFinite(d.raw) ? d.raw : 0));
+for (const [rel, list] of groups) {
+  const validVals = list
+    .map(d => d.raw)
+    .filter(v => Number.isFinite(v));
 
-    const baseValues = list.map(s => {
-      const valNum = Number.isFinite(s.raw) ? s.raw : minLeafRaw;
-      return { s, base: Math.max(EPS, (valNum - minLeafRaw + EPS)) };
-    });
+  const avg = validVals.length ? d3.mean(validVals) : 0;
+  const minLeafRaw = validVals.length ? d3.min(validVals) : 0;
 
-    const baseSum = d3.sum(baseValues, d => d.base) || EPS;
+  const baseValues = list.map(s => {
+    const valNum = Number.isFinite(s.raw) ? s.raw : minLeafRaw;
+    return { s, base: Math.max(EPS, (valNum - minLeafRaw + EPS)) };
+  });
 
-    allSummaries.push({
-      rel,
-      list,
-      avg,
-      baseValues,
-      baseSum
-    });
-  }
+  const baseSum = d3.sum(baseValues, d => d.base) || EPS;
+
+  allSummaries.push({
+    rel,
+    list,
+    avg,
+    baseValues,
+    baseSum
+  });
+}
 
   // ★ 上游：依平均值挑前 GROUP_KEEP_MAX 個類股
   // ★ 下游：維持原本依群組股票數挑前 GROUP_KEEP_MAX 群
@@ -846,20 +877,25 @@ function renderTreemap(svgId, hintId, edges, codeField, month, metric, colorMode
   d3.treemap().size([W, H]).paddingOuter(8).paddingInner(3).paddingTop(HEADER_H)(root);
 
   // ===== 過濾太小的個股 =====
-  const filteredChildren = (root.children || []).map(parent => {
-    const keptLeaves = (parent.children || []).filter(leaf => {
-      const w = Math.max(0, leaf.x1 - leaf.x0);
-      const h = Math.max(0, leaf.y1 - leaf.y0);
-      const area = w * h;
-      return w >= MIN_RENDER_W && h >= MIN_RENDER_H && area >= MIN_RENDER_AREA;
-    }).map(leaf => leaf.data);
+const filteredChildren = (root.children || []).map(parent => {
+  const keptLeaves = (parent.children || []).filter(leaf => {
+    const w = Math.max(0, leaf.x1 - leaf.x0);
+    const h = Math.max(0, leaf.y1 - leaf.y0);
+    const area = w * h;
 
-    return {
-      name: parent.data.name,
-      avg: parent.data.avg,
-      children: keptLeaves
-    };
-  }).filter(g => g.children && g.children.length > 0);
+    // 左邊全部保留，不因為方塊太小就刪掉
+    if (svgId === 'upTreemap') return true;
+
+    return w >= MIN_RENDER_W && h >= MIN_RENDER_H && area >= MIN_RENDER_AREA;
+  }).map(leaf => leaf.data);
+
+  return {
+    name: parent.data.name,
+    avg: parent.data.avg,
+    children: keptLeaves
+  };
+}).filter(g => g.children && g.children.length > 0);
+
 
   if (filteredChildren.length === 0) {
     hint.textContent = '此區個股方塊過小，已自動省略';
