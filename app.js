@@ -806,11 +806,19 @@ for (const [rel, list] of groups) {
     .filter(v => Number.isFinite(v));
 
   const avg = validVals.length ? d3.mean(validVals) : 0;
-  const minLeafRaw = validVals.length ? d3.min(validVals) : 0;
 
+  // ✅ 改成：用絕對值 + 開根號壓縮面積差距
+  // 這樣不會讓小值被壓到幾乎 0 面積
   const baseValues = list.map(s => {
-    const valNum = Number.isFinite(s.raw) ? s.raw : minLeafRaw;
-    return { s, base: Math.max(EPS, (valNum - minLeafRaw + EPS)) };
+    const rawVal = Number.isFinite(s.raw) ? Math.abs(s.raw) : 0;
+
+    // 最小保底面積，避免細成一條線
+    const minBase = (svgId === 'upTreemap') ? 1.2 : 0.8;
+
+    // 開根號壓縮差距：例如 28.3 vs 7.3 不會差到 2100 倍
+    const base = Math.max(minBase, Math.sqrt(rawVal + 1));
+
+    return { s, base };
   });
 
   const baseSum = d3.sum(baseValues, d => d.base) || EPS;
