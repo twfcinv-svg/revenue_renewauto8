@@ -260,7 +260,6 @@ for (const row of downRows) {
 console.log("Links 筆數 =", linksRows.length);
 console.log("左邊相同產業分類 DownLinks(GHI) 筆數 =", upstreamHJ.length);
 console.log("右邊 DownLinks(ABC) 筆數 =", downstreamHJ.length);
-``
 }
 
 function initControls(){
@@ -484,7 +483,7 @@ ellipsizeNameToWidth(textEl, maxW){
     name = name.slice(0, -1);
     t1.textContent = code + (name ? (' ' + name + '…') : '');
   }
-}
+},
 
   canFit(textEl, w, h){
     const p = this.dynPadding(w, h);
