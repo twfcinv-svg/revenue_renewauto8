@@ -377,9 +377,21 @@ function handleRun(){
   console.log('上游筆數 =', upstreamEdges.length, upstreamEdges);
   console.log('下游筆數 =', downstreamEdges.length, downstreamEdges);
 
+requestAnimationFrame(() => {
+    try {
+      renderResultChip(rowSelf, month, metric, colorMode);
+      renderTreemap('upTreemap', 'upHint', upstreamEdges, '上游代號', month, metric, colorMode);
+    } catch (err) {
+      console.error('[handleRun][upTreemap]', err);
+    }
+  });
+
   requestAnimationFrame(() => {
-    renderResultChip(rowSelf, month, metric, colorMode);
-    renderTreemap('upTreemap', 'upHint', upstreamEdges, '上游代號', month, metric, colorMode);
+    try {
+      renderTreemap('downTreemap', 'downHint', downstreamEdges, '下游代號', month, metric, colorMode);
+    } catch (err) {
+      console.error('[handleRun][downTreemap]', err);
+    }
   });
 
   requestAnimationFrame(() => {
@@ -389,6 +401,11 @@ function handleRun(){
 
 function renderResultChip(selfRow, month, metric, colorMode){
   const host = document.querySelector('#resultChip');
+  if (!host) {
+    console.warn('[renderResultChip] 找不到 #resultChip，略過 result card 繪製');
+    return;
+  }
+
   const v = getMetricValue(selfRow, month, metric);
   const bg = colorFor(v, colorMode);
 
@@ -451,39 +468,39 @@ const LabelFit = {
   },
 
 ellipsizeNameToWidth(textEl, maxW){
-  const tspans = textEl.querySelectorAll('tspan');
-  if (!tspans || tspans.length === 0) return;
+    const tspans = textEl.querySelectorAll('tspan');
+    if (!tspans || tspans.length === 0) return;
 
-  // 新版：預期第 1 行是代號、第 2 行是名稱、第 3 行是漲跌幅
-  if (tspans.length >= 2) {
-    const nameTspan = tspans[1];
-    let name = nameTspan.textContent || '';
+    // 只有三行模式（代號 / 名稱 / 漲跌幅）時，第 2 行才是名稱
+    if (tspans.length >= 3) {
+      const nameTspan = tspans[1];
+      let name = nameTspan.textContent || '';
 
-    while (nameTspan.getComputedTextLength() > maxW && name.length > 0) {
-      name = name.slice(0, -1);
-      nameTspan.textContent = name ? (name + '…') : '';
+      while (nameTspan.getComputedTextLength() > maxW && name.length > 0) {
+        name = name.slice(0, -1);
+        nameTspan.textContent = name ? (name + '…') : '';
+      }
+      return;
     }
-    return;
-  }
 
-  // 保底：若未來仍有舊版單行「代號 名稱」格式，也能正常縮字
-  const t1 = tspans[0];
-  const full = t1.textContent || '';
-  const m = full.match(/^(\d{4})\s*(.*)$/);
-  let code = '', name = full;
+    // 保底：舊版單行「代號 名稱」格式
+    const t1 = tspans[0];
+    const full = t1.textContent || '';
+    const m = full.match(/^(\d{4})\s*(.*)$/);
+    let code = '', name = full;
 
-  if (m) {
-    code = m[1];
-    name = m[2] || '';
-  }
+    if (m) {
+      code = m[1];
+      name = m[2] || '';
+    }
 
-  t1.textContent = code + (name ? (' ' + name) : '');
+    t1.textContent = code + (name ? (' ' + name) : '');
 
-  while (t1.getComputedTextLength() > maxW && name.length > 0) {
-    name = name.slice(0, -1);
-    t1.textContent = code + (name ? (' ' + name + '…') : '');
-  }
-},
+    while (t1.getComputedTextLength() > maxW && name.length > 0) {
+      name = name.slice(0, -1);
+      t1.textContent = code + (name ? (' ' + name + '…') : '');
+    }
+  },
 
   canFit(textEl, w, h){
     const p = this.dynPadding(w, h);
@@ -762,24 +779,35 @@ const GroupTitleFit = {
   }
 };
 
+
 function renderTreemap(svgId, hintId, edges, codeField, month, metric, colorMode){
-  const svg = d3.select('#' + svgId);
+  const svgEl = document.getElementById(svgId);
+  if (!svgEl) {
+    console.warn(`[renderTreemap] 找不到 #${svgId}`);
+    return;
+  }
+
+  const hint = document.getElementById(hintId) || null;
+  const svg = d3.select(svgEl);
   svg.selectAll('*').remove();
 
-  const wrap = svg.node().parentElement;
-  const W = wrap.clientWidth - 16;
-  const H = parseInt(getComputedStyle(svg.node()).height) || 560;
+  const wrap = svgEl.parentElement;
+  if (!wrap) {
+    console.warn(`[renderTreemap] #${svgId} 沒有 parentElement`);
+    return;
+  }
+
+  const W = Math.max(320, (wrap.clientWidth || 0) - 16);
+  const H = Math.max(320, parseInt(getComputedStyle(svgEl).height, 10) || 560);
   svg.attr('width', W).attr('height', H);
 
   const groups = new Map();
 
-  for (const e of edges) {
+  for (const e of (edges || [])) {
     const keyRaw = normCode(e[codeField] || e['down'] || e['up']);
     if (isUSCode(keyRaw)) continue;
 
     const r = byCode.get(keyRaw);
-
-    // ★ 上游依產業別分群；下游維持依關係類型分群
     const groupName = getTreemapGroupName(svgId, e, r);
 
     if (!groups.has(groupName)) groups.set(groupName, []);
@@ -806,56 +834,45 @@ function renderTreemap(svgId, hintId, edges, codeField, month, metric, colorMode
     });
   }
 
-  const hint = document.getElementById(hintId);
   if (groups.size === 0) {
-    hint.textContent = '';
+    if (hint) hint.textContent = '查無關聯個股';
     return;
   }
 
   const EPS = 0.01;
   const allSummaries = [];
 
-for (const [rel, list] of groups) {
-  const validVals = list
-    .map(d => d.raw)
-    .filter(v => Number.isFinite(v));
+  for (const [rel, list] of groups) {
+    const validVals = list
+      .map(d => d.raw)
+      .filter(v => Number.isFinite(v));
 
-  const avg = validVals.length ? d3.mean(validVals) : 0;
+    const avg = validVals.length ? d3.mean(validVals) : 0;
 
-  // ✅ 改成：用絕對值 + 開根號壓縮面積差距
-  // 這樣不會讓小值被壓到幾乎 0 面積
-  const baseValues = list.map(s => {
-    const rawVal = Number.isFinite(s.raw) ? Math.abs(s.raw) : 0;
+    const baseValues = list.map(s => {
+      const rawVal = Number.isFinite(s.raw) ? Math.abs(s.raw) : 0;
+      const minBase = (svgId === 'upTreemap') ? 1.2 : 0.8;
+      const base = Math.max(minBase, Math.sqrt(rawVal + 1));
+      return { s, base };
+    });
 
-    // 最小保底面積，避免細成一條線
-    const minBase = (svgId === 'upTreemap') ? 1.2 : 0.8;
+    const baseSum = d3.sum(baseValues, d => d.base) || EPS;
 
-    // 開根號壓縮差距：例如 28.3 vs 7.3 不會差到 2100 倍
-    const base = Math.max(minBase, Math.sqrt(rawVal + 1));
+    allSummaries.push({
+      rel,
+      list,
+      avg,
+      baseValues,
+      baseSum
+    });
+  }
 
-    return { s, base };
-  });
-
-  const baseSum = d3.sum(baseValues, d => d.base) || EPS;
-
-  allSummaries.push({
-    rel,
-    list,
-    avg,
-    baseValues,
-    baseSum
-  });
-}
-
-  // ★ 上游：依平均值挑前 GROUP_KEEP_MAX 個類股
-  // ★ 下游：維持原本依群組股票數挑前 GROUP_KEEP_MAX 群
   const groupSummaries = selectTreemapGroups(svgId, allSummaries);
 
   if (groupSummaries.length === 0) {
-    hint.textContent = '';
+    if (hint) hint.textContent = '沒有符合條件的群組';
     return;
   }
-
 
   let groupWeights = new Map();
 
@@ -895,39 +912,47 @@ for (const [rel, list] of groups) {
     });
   }
 
-  // ===== 第一次 layout：先算出位置 =====
-  let root = d3.hierarchy({ children }).sum(d => d.value).sort((a, b) => (b.value || 0) - (a.value || 0));
-  d3.treemap().size([W, H]).paddingOuter(8).paddingInner(3).paddingTop(HEADER_H)(root);
+  let root = d3.hierarchy({ children })
+    .sum(d => d.value)
+    .sort((a, b) => (b.value || 0) - (a.value || 0));
 
-  // ===== 過濾太小的個股 =====
-const filteredChildren = (root.children || []).map(parent => {
-  const keptLeaves = (parent.children || []).filter(leaf => {
-    const w = Math.max(0, leaf.x1 - leaf.x0);
-    const h = Math.max(0, leaf.y1 - leaf.y0);
-    const area = w * h;
+  d3.treemap()
+    .size([W, H])
+    .paddingOuter(8)
+    .paddingInner(3)
+    .paddingTop(HEADER_H)(root);
 
-    // 左邊全部保留，不因為方塊太小就刪掉
-    if (svgId === 'upTreemap') return true;
+  const filteredChildren = (root.children || []).map(parent => {
+    const keptLeaves = (parent.children || []).filter(leaf => {
+      const w = Math.max(0, leaf.x1 - leaf.x0);
+      const h = Math.max(0, leaf.y1 - leaf.y0);
+      const area = w * h;
 
-    return w >= MIN_RENDER_W && h >= MIN_RENDER_H && area >= MIN_RENDER_AREA;
-  }).map(leaf => leaf.data);
+      if (svgId === 'upTreemap') return true;
+      return w >= MIN_RENDER_W && h >= MIN_RENDER_H && area >= MIN_RENDER_AREA;
+    }).map(leaf => leaf.data);
 
-  return {
-    name: parent.data.name,
-    avg: parent.data.avg,
-    children: keptLeaves
-  };
-}).filter(g => g.children && g.children.length > 0);
-
+    return {
+      name: parent.data.name,
+      avg: parent.data.avg,
+      children: keptLeaves
+    };
+  }).filter(g => g.children && g.children.length > 0);
 
   if (filteredChildren.length === 0) {
-    hint.textContent = '此區個股方塊過小，已自動省略';
+    if (hint) hint.textContent = '此區個股方塊過小，已自動省略';
     return;
   }
 
-  // ===== 第二次 layout：只對保留下來的個股重新排版 =====
-  root = d3.hierarchy({ children: filteredChildren }).sum(d => d.value).sort((a, b) => (b.value || 0) - (a.value || 0));
-  d3.treemap().size([W, H]).paddingOuter(8).paddingInner(3).paddingTop(HEADER_H)(root);
+  root = d3.hierarchy({ children: filteredChildren })
+    .sum(d => d.value)
+    .sort((a, b) => (b.value || 0) - (a.value || 0));
+
+  d3.treemap()
+    .size([W, H])
+    .paddingOuter(8)
+    .paddingInner(3)
+    .paddingTop(HEADER_H)(root);
 
   const g = svg.append('g');
 
@@ -982,33 +1007,27 @@ const filteredChildren = (root.children || []).map(parent => {
     .style('stroke-width', '2px')
     .style('text-rendering', 'geometricPrecision');
 
-labels.each(function(d){
-  const code = `${d.data.code || ''}`.trim();
-  const name = `${d.data.name || ''}`.trim();
-  const pct  = displayPct(d.data.raw);
-  const rel  = `${d.data.rel || ''}`.trim();
+  labels.each(function(d){
+    const code = `${d.data.code || ''}`.trim();
+    const name = `${d.data.name || ''}`.trim();
+    const pct  = displayPct(d.data.raw);
+    const rel  = `${d.data.rel || ''}`.trim();
 
-  this.dataset.code = code;
-  this.dataset.name = name;
-  this.dataset.pct = pct;
+    this.dataset.code = code;
+    this.dataset.name = name;
+    this.dataset.pct = pct;
 
-  const t1 = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-  t1.textContent = code;
+    const lines = [code, name, pct].filter(Boolean);
+    lines.forEach(line => {
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+      t.textContent = line;
+      this.appendChild(t);
+    });
 
-  const t2 = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-  t2.textContent = name;
-
-  const t3 = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-  t3.textContent = pct;
-
-  this.appendChild(t1);
-  if (name) this.appendChild(t2);
-  this.appendChild(t3);
-
-  const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-  title.textContent = `${code} ${name}\n${rel}\n${month.slice(0,4)}/${month.slice(4,6)} ${metric}: ${pct}`;
-  this.appendChild(title);
-});
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    title.textContent = `${code} ${name}\n${rel}\n${month.slice(0,4)}/${month.slice(4,6)} ${metric}: ${pct}`;
+    this.appendChild(title);
+  });
 
   if (ENABLE_NODE_CLICK) {
     node
@@ -1026,21 +1045,35 @@ labels.each(function(d){
 
   requestAnimationFrame(() => {
     node.each(function(d){
-      const w = Math.max(0, d.x1 - d.x0), h = Math.max(0, d.y1 - d.y0);
+      const w = Math.max(0, d.x1 - d.x0);
+      const h = Math.max(0, d.y1 - d.y0);
       const textEl = this.querySelector('text');
       if (!textEl) return;
-      LabelFit.fitBlock(textEl, w, h);
-      LabelFit.ensureClip(this, w, h);
+
+      try {
+        LabelFit.fitBlock(textEl, w, h);
+        LabelFit.ensureClip(this, w, h);
+      } catch (err) {
+        console.error(`[LabelFit ${svgId}]`, err, d);
+      }
     });
 
     parents.select('text').each(function(d){
-      GroupTitleFit.fit(this, d, HEADER_H);
+      try {
+        GroupTitleFit.fit(this, d, HEADER_H);
+      } catch (err) {
+        console.error(`[GroupTitleFit ${svgId}]`, err, d);
+      }
     });
   });
 
   const onResize = () => {
     parents.select('text').each(function(d){
-      GroupTitleFit.fit(this, d, HEADER_H);
+      try {
+        GroupTitleFit.fit(this, d, HEADER_H);
+      } catch (err) {
+        console.error(`[resize title fit ${svgId}]`, err, d);
+      }
     });
   };
 
