@@ -451,26 +451,40 @@ const LabelFit = {
     gEl.querySelectorAll('text').forEach(t => t.setAttribute('clip-path', `url(#${id})`));
   },
 
-  ellipsizeNameToWidth(textEl, maxW){
-    const t1 = textEl.querySelector('tspan');
-    if (!t1) return;
+ellipsizeNameToWidth(textEl, maxW){
+  const tspans = textEl.querySelectorAll('tspan');
+  if (!tspans || tspans.length === 0) return;
 
-    const full = t1.textContent || '';
-    const m = full.match(/^(\d{4})\s*(.*)$/);
-    let code = '', name = full;
+  // 新版：預期第 1 行是代號、第 2 行是名稱、第 3 行是漲跌幅
+  if (tspans.length >= 2) {
+    const nameTspan = tspans[1];
+    let name = nameTspan.textContent || '';
 
-    if (m) {
-      code = m[1];
-      name = m[2] || '';
-    }
-
-    t1.textContent = code + (name ? (' ' + name) : '');
-
-    while (t1.getComputedTextLength() > maxW && name.length > 0) {
+    while (nameTspan.getComputedTextLength() > maxW && name.length > 0) {
       name = name.slice(0, -1);
-      t1.textContent = code + (name ? (' ' + name + '…') : '');
+      nameTspan.textContent = name ? (name + '…') : '';
     }
-  },
+    return;
+  }
+
+  // 保底：若未來仍有舊版單行「代號 名稱」格式，也能正常縮字
+  const t1 = tspans[0];
+  const full = t1.textContent || '';
+  const m = full.match(/^(\d{4})\s*(.*)$/);
+  let code = '', name = full;
+
+  if (m) {
+    code = m[1];
+    name = m[2] || '';
+  }
+
+  t1.textContent = code + (name ? (' ' + name) : '');
+
+  while (t1.getComputedTextLength() > maxW && name.length > 0) {
+    name = name.slice(0, -1);
+    t1.textContent = code + (name ? (' ' + name + '…') : '');
+  }
+}
 
   canFit(textEl, w, h){
     const p = this.dynPadding(w, h);
@@ -479,10 +493,11 @@ const LabelFit = {
     const name = textEl.dataset.name || '';
     const pct = textEl.dataset.pct || '';
 
-    const layouts = [
-      () => [`${code}${name ? (' ' + name) : ''}`, pct],
-      () => [code, pct]
-    ];
+  const layouts = [
+    () => [code, name, pct].filter(Boolean),
+    () => [code, pct].filter(Boolean)
+  ];
+
 
     const k = 0.12;
     const areaFont = Math.sqrt(targetW * targetH) * k;
@@ -542,9 +557,10 @@ const LabelFit = {
     const pct = textEl.dataset.pct || '';
 
     const layouts = [
-      () => [`${code}${name ? (' ' + name) : ''}`, pct],
-      () => [code, pct]
+      () => [code, name, pct].filter(Boolean),
+      () => [code, pct].filter(Boolean)
     ];
+
 
     const k = 0.12;
     const areaFont = Math.sqrt(targetW * targetH) * k;
@@ -967,29 +983,33 @@ const filteredChildren = (root.children || []).map(parent => {
     .style('stroke-width', '2px')
     .style('text-rendering', 'geometricPrecision');
 
-  labels.each(function(d){
-    const code = `${d.data.code || ''}`.trim();
-    const name = `${d.data.name || ''}`.trim();
-    const pct  = displayPct(d.data.raw);
-    const rel  = `${d.data.rel || ''}`.trim();
+labels.each(function(d){
+  const code = `${d.data.code || ''}`.trim();
+  const name = `${d.data.name || ''}`.trim();
+  const pct  = displayPct(d.data.raw);
+  const rel  = `${d.data.rel || ''}`.trim();
 
-    this.dataset.code = code;
-    this.dataset.name = name;
-    this.dataset.pct = pct;
+  this.dataset.code = code;
+  this.dataset.name = name;
+  this.dataset.pct = pct;
 
-    const t1 = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-    t1.textContent = `${code}${name ? (' ' + name) : ''}`;
+  const t1 = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+  t1.textContent = code;
 
-    const t2 = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-    t2.textContent = pct;
+  const t2 = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+  t2.textContent = name;
 
-    this.appendChild(t1);
-    this.appendChild(t2);
+  const t3 = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+  t3.textContent = pct;
 
-    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    title.textContent = `${code} ${name}\n${rel}\n${month.slice(0,4)}/${month.slice(4,6)} ${metric}: ${pct}`;
-    this.appendChild(title);
-  });
+  this.appendChild(t1);
+  if (name) this.appendChild(t2);
+  this.appendChild(t3);
+
+  const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+  title.textContent = `${code} ${name}\n${rel}\n${month.slice(0,4)}/${month.slice(4,6)} ${metric}: ${pct}`;
+  this.appendChild(title);
+});
 
   if (ENABLE_NODE_CLICK) {
     node
