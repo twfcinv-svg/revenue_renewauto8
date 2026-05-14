@@ -398,7 +398,7 @@ requestAnimationFrame(() => {
       console.error('[handleRun][downTreemap]', err);
     }
   });
-
+}
 
 
 function renderResultChip(selfRow, month, metric, colorMode){
