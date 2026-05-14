@@ -264,6 +264,11 @@ console.log("右邊 DownLinks(ABC) 筆數 =", downstreamHJ.length);
 
 function initControls(){
   const sel = document.querySelector('#monthSelect');
+  if (!sel) {
+    console.warn('[initControls] 找不到 #monthSelect');
+    return;
+  }
+
   sel.innerHTML = '';
 
   for (const m of months) {
@@ -394,10 +399,7 @@ requestAnimationFrame(() => {
     }
   });
 
-  requestAnimationFrame(() => {
-    renderTreemap('downTreemap', 'downHint', downstreamEdges, '下游代號', month, metric, colorMode);
-  });
-}
+
 
 function renderResultChip(selfRow, month, metric, colorMode){
   const host = document.querySelector('#resultChip');
