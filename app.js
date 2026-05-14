@@ -146,6 +146,7 @@ async function loadWorkbook(){
 
   const buf = await res.arrayBuffer();
   const wb  = XLSX.read(buf, { type:'array' });
+  console.log('[工作表名稱]', wb.SheetNames);
 
   const wsRev = wb.Sheets[REVENUE_SHEET];
   const wsLinks = wb.Sheets[LINKS_SHEET];
@@ -154,32 +155,58 @@ async function loadWorkbook(){
 
   if (!wsRev || !wsLinks) throw new Error('找不到必要工作表 Revenue 或 Links');
 
-  const rowsHeaderFirst = XLSX.utils.sheet_to_json(wsRev, { header:1, blankrows:false });
+  const rowsHeaderFirst = XLSX.utils.sheet_to_json(wsRev, { header: 1, blankrows: false });
   const headerRow = Array.isArray(rowsHeaderFirst) && rowsHeaderFirst.length > 0 ? rowsHeaderFirst[0] : [];
   const found = new Set();
 
+  // 先清空，避免舊資料殘留
+  for (const k of Object.keys(COL_MAP)) delete COL_MAP[k];
+
+  console.log('[Revenue headerRow]', headerRow);
+
   for (const rawHeader of headerRow) {
     if (!rawHeader) continue;
-    const h = normText(String(rawHeader));
 
-    let m = h.match(/^(\d{4})[\/年-]?\s*(\d{1,2})\s*單月合併營收\s*年[成增]長\s*[\(（]?\s*(?:%|％)\s*[\)）]?$/);
-    if (m) {
-      const ym = m[1] + String(m[2]).padStart(2,'0');
+    const h = normText(String(rawHeader));
+    console.log('[檢查欄名]', h);
+
+    // 先抓年月：支援 2025/3、2025年3月、2025-03、202503
+    let ymMatch =
+      h.match(/(20\d{2})[\/年\-]?\s*(\d{1,2})\s*月?/) ||
+      h.match(/(20\d{2})(\d{2})/);
+
+    if (!ymMatch) continue;
+
+    const ym = ymMatch[1] + String(ymMatch[2]).padStart(2, '0');
+
+    // 判斷欄位是 YoY 還是 MoM（放寬條件）
+    const isYoY =
+      /年增|年成長|YoY/i.test(h);
+
+    const isMoM =
+      /月增|月變動|MoM/i.test(h);
+ 
+    if (isYoY) {
       (COL_MAP[ym] ??= {}).YoY = rawHeader;
       found.add(ym);
+      console.log(`[COL_MAP][${ym}].YoY =`, rawHeader);
       continue;
     }
 
-    m = h.match(/^(\d{4})[\/年-]?\s*(\d{1,2})\s*單月合併營收\s*月[變增]動\s*[\(（]?\s*(?:%|％)\s*[\)）]?$/);
-    if (m) {
-      const ym = m[1] + String(m[2]).padStart(2,'0');
+    if (isMoM) {
       (COL_MAP[ym] ??= {}).MoM = rawHeader;
       found.add(ym);
+      console.log(`[COL_MAP][${ym}].MoM =`, rawHeader);
       continue;
     }
   }
 
   months = Array.from(found).sort((a, b) => b.localeCompare(a));
+
+  console.log('[months]', months);
+  console.log('[COL_MAP]', COL_MAP);
+
+  
 
   revenueRows = XLSX.utils.sheet_to_json(wsRev,   { defval:null });
   linksRows   = XLSX.utils.sheet_to_json(wsLinks, { defval:null });
@@ -271,6 +298,15 @@ function initControls(){
 
   sel.innerHTML = '';
 
+  if (!months.length) {
+    console.error('[initControls] months 是空的，無法建立月份下拉選單');
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = '無可用月份';
+    sel.appendChild(o);
+    return;
+  }
+
   for (const m of months) {
     const o = document.createElement('option');
     o.value = m;
@@ -278,7 +314,8 @@ function initControls(){
     sel.appendChild(o);
   }
 
-  if (!sel.value && months.length > 0) sel.value = months[0];
+  sel.value = months[0];
+  console.log('[initControls] monthSelect 預設值 =', sel.value);
 }
 
 function getMetricValue(row, month, metric){
@@ -340,6 +377,15 @@ function handleRun(){
   const month = (document.querySelector('#monthSelect')?.value) || '';
   const metric = (document.querySelector('#metricSelect')?.value) || 'MoM';
   const colorMode = (document.querySelector('#colorMode')?.value) || 'redPositive';
+  console.log('[handleRun] raw =', raw);
+  console.log('[handleRun] month =', month);
+  console.log('[handleRun] metric =', metric);
+  console.log('[handleRun] colorMode =', colorMode);
+
+  if (!month) {
+    alert('月份尚未載入，請先檢查 Revenue 工作表欄名格式是否有抓到月份');
+    return;
+  }
 
   if (!raw || !raw.trim()) {
     alert('請輸入股票代號或公司名稱');
